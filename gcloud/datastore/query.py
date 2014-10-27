@@ -3,8 +3,7 @@
 import base64
 
 from gcloud.datastore import datastore_v1_pb2 as datastore_pb
-from gcloud.datastore import _helpers
-from gcloud.datastore.entity import Entity
+from gcloud.datastore import helpers
 from gcloud.datastore.key import Key
 
 
@@ -151,7 +150,7 @@ class Query(object):
         property_filter.operator = operator
 
         # Set the value to filter on based on the type.
-        _helpers._set_protobuf_value(property_filter.value, value)
+        helpers._set_protobuf_value(property_filter.value, value)
         return clone
 
     def ancestor(self, ancestor):
@@ -333,10 +332,17 @@ class Query(object):
             dataset_id=self.dataset().id(),
             namespace=self._namespace,
             )
+        # NOTE: `query_results` contains two extra values that we don't use,
+        #       namely `more_results` and `skipped_results`. The value of
+        #       `more_results` is unusable because it always returns an enum
+        #       value of MORE_RESULTS_AFTER_LIMIT even if there are no more
+        #       results. See
+        #       https://github.com/GoogleCloudPlatform/gcloud-python/issues/280
+        #       for discussion.
         entity_pbs, end_cursor = query_results[:2]
 
         self._cursor = end_cursor
-        return [Entity.from_protobuf(entity, dataset=self.dataset())
+        return [helpers.entity_from_protobuf(entity, dataset=self.dataset())
                 for entity in entity_pbs]
 
     def cursor(self):
