@@ -70,15 +70,13 @@ class Entity(dict):
 
     """
 
-    def __init__(self, dataset=None, kind=None, exclude_from_indexes=None):
+    def __init__(self, dataset=None, kind=None):
         super(Entity, self).__init__()
         self._dataset = dataset
         if kind:
             self._key = Key().kind(kind)
         else:
             self._key = None
-
-        self._exclude_from_indexes = exclude_from_indexes
 
     def dataset(self):
         """Get the :class:`.dataset.Dataset` in which this entity belongs.
