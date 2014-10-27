@@ -99,6 +99,12 @@ class Property(object):
     def _prepare_for_put(self, entity):
         pass
 
+    def from_db_value(self, value):
+        return self._from_db_value(value)
+
+    def _from_db_value(self, value):
+        return value
+
 class BooleanProperty(Property):
     def _validate(self, value):
         assert isinstance(value, bool)
@@ -148,7 +154,10 @@ class TextProperty(BlobProperty):
         return value
 
     def _to_base_type(self, value):
-        return value.encode('utf-8')
+        if isinstance(value, str):
+            return value.decode('utf-8')
+
+        return value
 
     def _from_base_type(self, value):
         if isinstance(value, str):
@@ -156,6 +165,11 @@ class TextProperty(BlobProperty):
         elif isinstance(value, unicode):
             return value
 
+    def _from_db_value(self, value):
+        if isinstance(value, str):
+            return value.decode('utf-8')
+
+        return value
 
 class StringProperty(TextProperty):
     def __init__(self, name=None, indexed=True, **kwargs):
@@ -299,7 +313,8 @@ class Model(entity.Entity):
 
         for name in cls._properties:
             value = entity.get(name)
-            obj[name] = value
+            # string property from protobuf is str, but gcloud-python need unicode
+            obj[name] = cls._properties[name].from_db_value(value)
 
         return obj
 
