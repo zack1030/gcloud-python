@@ -252,6 +252,7 @@ class Model(entity.Entity):
     # name, prop dict
     _properties = None
     _kind_map = {}
+    _exclude_from_indexes = []
 
     def __init__(self, id=None, **kwargs):
         super(Model, self).__init__(dataset, self.__class__.__name__)
@@ -264,12 +265,13 @@ class Model(entity.Entity):
     @classmethod
     def _fix_up_properties(cls):
         cls._properties = {}
-
         for name in cls.__dict__:
             attr = cls.__dict__[name]
             if isinstance(attr, Property):
                 attr._fix_up(cls, name)
                 cls._properties[attr._name] = attr
+                if attr._indexed is False:
+                    cls._exclude_from_indexes.append(attr._name)
 
         cls._kind_map[cls.__name__] = cls
 
