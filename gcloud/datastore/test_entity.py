@@ -132,7 +132,7 @@ class TestEntity(unittest2.TestCase):
         self.assertTrue(entity.save() is entity)
         self.assertEqual(entity['foo'], 'Foo')
         self.assertEqual(connection._saved,
-                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}))
+                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}, None))
         self.assertEqual(key._path, None)
 
     def test_save_w_transaction_wo_partial_key(self):
@@ -146,7 +146,7 @@ class TestEntity(unittest2.TestCase):
         self.assertTrue(entity.save() is entity)
         self.assertEqual(entity['foo'], 'Foo')
         self.assertEqual(connection._saved,
-                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}))
+                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}, None))
         self.assertEqual(transaction._added, ())
         self.assertEqual(key._path, None)
 
@@ -162,7 +162,7 @@ class TestEntity(unittest2.TestCase):
         self.assertTrue(entity.save() is entity)
         self.assertEqual(entity['foo'], 'Foo')
         self.assertEqual(connection._saved,
-                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}))
+                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}, None))
         self.assertEqual(transaction._added, (entity,))
         self.assertEqual(key._path, None)
 
@@ -181,7 +181,7 @@ class TestEntity(unittest2.TestCase):
         self.assertTrue(entity.save() is entity)
         self.assertEqual(entity['foo'], 'Foo')
         self.assertEqual(connection._saved,
-                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}))
+                         (_DATASET_ID, 'KEY', {'foo': 'Foo'}, None))
         self.assertEqual(key._path, [{'kind': _KIND, 'id': _ID}])
 
     def test_delete_no_key(self):
@@ -257,8 +257,8 @@ class _Connection(object):
     def transaction(self):
         return self._transaction
 
-    def save_entity(self, dataset_id, key_pb, properties):
-        self._saved = (dataset_id, key_pb, properties)
+    def save_entity(self, dataset_id, key_pb, properties, exclude_from_indexes=None):
+        self._saved = (dataset_id, key_pb, properties, exclude_from_indexes)
         return self._save_result
 
     def delete_entities(self, dataset_id, key_pbs):

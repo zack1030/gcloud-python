@@ -70,13 +70,15 @@ class Entity(dict):
 
     """
 
-    def __init__(self, dataset=None, kind=None):
+    def __init__(self, dataset=None, kind=None, exclude_from_indexes=None):
         super(Entity, self).__init__()
         self._dataset = dataset
         if kind:
             self._key = Key().kind(kind)
         else:
             self._key = None
+
+        self._exclude_from_indexes = exclude_from_indexes
 
     def dataset(self):
         """Get the :class:`.dataset.Dataset` in which this entity belongs.
@@ -213,7 +215,9 @@ class Entity(dict):
         key_pb = connection.save_entity(
             dataset_id=dataset.id(),
             key_pb=key.to_protobuf(),
-            properties=dict(self))
+            properties=dict(self),
+            exclude_from_indexes=self._exclude_from_indexes
+        )
 
         # If we are in a transaction and the current entity needs an
         # automatically assigned ID, tell the transaction where to put that.
