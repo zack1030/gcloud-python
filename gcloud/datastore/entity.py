@@ -78,6 +78,7 @@ class Entity(dict):
         else:
             self._key = None
 
+
     def dataset(self):
         """Get the :class:`.dataset.Dataset` in which this entity belongs.
 
@@ -207,14 +208,17 @@ class Entity(dict):
         :rtype: :class:`gcloud.datastore.entity.Entity`
         :returns: The entity with a possibly updated Key.
         """
+
         key = self._must_key
         dataset = self._must_dataset
         connection = dataset.connection()
+
+
         key_pb = connection.save_entity(
             dataset_id=dataset.id(),
             key_pb=key.to_protobuf(),
             properties=dict(self),
-            exclude_from_indexes=self._exclude_from_indexes
+            exclude_from_indexes=getattr(self, '_exclude_from_indexes', None)
         )
 
         # If we are in a transaction and the current entity needs an
