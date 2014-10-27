@@ -213,7 +213,9 @@ class Entity(dict):
         key_pb = connection.save_entity(
             dataset_id=dataset.id(),
             key_pb=key.to_protobuf(),
-            properties=dict(self))
+            properties=dict(self),
+            exclude_from_indexes=self._exclude_from_indexes
+        )
 
         # If we are in a transaction and the current entity needs an
         # automatically assigned ID, tell the transaction where to put that.
