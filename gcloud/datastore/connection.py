@@ -339,7 +339,7 @@ class Connection(connection.Connection):
                              datastore_pb.CommitResponse)
         return response.mutation_result
 
-    def save_entity(self, dataset_id, key_pb, properties):
+    def save_entity(self, dataset_id, key_pb, properties, exclude_from_indexes=None):
         """Save an entity to the Cloud Datastore with the provided properties.
 
         .. note::
@@ -377,6 +377,10 @@ class Connection(connection.Connection):
 
             # Set the appropriate value.
             helpers._set_protobuf_value(prop.value, value)
+
+            # Set property index
+            if not exclude_from_indexes is None and name in exclude_from_indexes:
+                prop.value.indexed = False
 
         # If this is in a transaction, we should just return True. The
         # transaction will handle assigning any keys as necessary.
