@@ -63,21 +63,57 @@ class TestQuery(unittest2.TestCase):
         kq_pb, = list(q_pb.kind)
         self.assertEqual(kq_pb.name, _KIND)
 
+    def test_filter_w_no_operator(self):
+        query = self._makeOne()
+        self.assertRaises(ValueError, query.filter, 'firstname', 'John')
+
     def test_filter_w_unknown_operator(self):
         query = self._makeOne()
         self.assertRaises(ValueError, query.filter, 'firstname ~~', 'John')
 
     def test_filter_w_known_operator(self):
+        from gcloud.datastore import datastore_v1_pb2 as datastore_pb
+
         query = self._makeOne()
         after = query.filter('firstname =', u'John')
         self.assertFalse(after is query)
         self.assertTrue(isinstance(after, self._getTargetClass()))
         q_pb = after.to_protobuf()
-        self.assertEqual(q_pb.filter.composite_filter.operator, 1)  # AND
+        self.assertEqual(q_pb.filter.composite_filter.operator,
+                         datastore_pb.CompositeFilter.AND)
         f_pb, = list(q_pb.filter.composite_filter.filter)
         p_pb = f_pb.property_filter
         self.assertEqual(p_pb.property.name, 'firstname')
         self.assertEqual(p_pb.value.string_value, u'John')
+        self.assertEqual(p_pb.operator, datastore_pb.PropertyFilter.EQUAL)
+
+    def test_filter_w_all_operators(self):
+        from gcloud.datastore import datastore_v1_pb2 as datastore_pb
+
+        query = self._makeOne()
+        query = query.filter('leq_prop <=', u'val1')
+        query = query.filter('geq_prop >=', u'val2')
+        query = query.filter('lt_prop <', u'val3')
+        query = query.filter('gt_prop >', u'val4')
+        query = query.filter('eq_prop =', u'val5')
+
+        query_pb = query.to_protobuf()
+        pb_values = [
+            ('leq_prop', 'val1',
+             datastore_pb.PropertyFilter.LESS_THAN_OR_EQUAL),
+            ('geq_prop', 'val2',
+             datastore_pb.PropertyFilter.GREATER_THAN_OR_EQUAL),
+            ('lt_prop', 'val3', datastore_pb.PropertyFilter.LESS_THAN),
+            ('gt_prop', 'val4', datastore_pb.PropertyFilter.GREATER_THAN),
+            ('eq_prop', 'val5', datastore_pb.PropertyFilter.EQUAL),
+        ]
+        query_filter = query_pb.filter.composite_filter.filter
+        for filter_pb, pb_value in zip(query_filter, pb_values):
+            name, val, filter_enum = pb_value
+            prop_filter = filter_pb.property_filter
+            self.assertEqual(prop_filter.property.name, name)
+            self.assertEqual(prop_filter.value.string_value, val)
+            self.assertEqual(prop_filter.operator, filter_enum)
 
     def test_filter_w_known_operator_and_entity(self):
         import operator
@@ -414,6 +450,88 @@ class TestQuery(unittest2.TestCase):
         prop_pb = order_pb[1]
         self.assertEqual(prop_pb.property.name, 'bar')
         self.assertEqual(prop_pb.direction, prop_pb.DESCENDING)
+
+    def test_projection_empty(self):
+        _KIND = 'KIND'
+        before = self._makeOne(_KIND)
+        after = before.projection([])
+        self.assertFalse(after is before)
+        self.assertTrue(isinstance(after, self._getTargetClass()))
+        self.assertEqual(before.to_protobuf(), after.to_protobuf())
+
+    def test_projection_non_empty(self):
+        _KIND = 'KIND'
+        before = self._makeOne(_KIND)
+        after = before.projection(['field1', 'field2'])
+        projection_pb = list(after.to_protobuf().projection)
+        self.assertEqual(len(projection_pb), 2)
+        prop_pb1 = projection_pb[0]
+        self.assertEqual(prop_pb1.property.name, 'field1')
+        prop_pb2 = projection_pb[1]
+        self.assertEqual(prop_pb2.property.name, 'field2')
+
+    def test_get_projection_non_empty(self):
+        _KIND = 'KIND'
+        _PROJECTION = ['field1', 'field2']
+        after = self._makeOne(_KIND).projection(_PROJECTION)
+        self.assertEqual(after.projection(), _PROJECTION)
+
+    def test_projection_multiple_calls(self):
+        _KIND = 'KIND'
+        _PROJECTION1 = ['field1', 'field2']
+        _PROJECTION2 = ['field3']
+        before = self._makeOne(_KIND).projection(_PROJECTION1)
+        self.assertEqual(before.projection(), _PROJECTION1)
+        after = before.projection(_PROJECTION2)
+        self.assertEqual(after.projection(), _PROJECTION2)
+
+    def test_set_offset(self):
+        _KIND = 'KIND'
+        _OFFSET = 42
+        before = self._makeOne(_KIND)
+        after = before.offset(_OFFSET)
+        offset_pb = after.to_protobuf().offset
+        self.assertEqual(offset_pb, _OFFSET)
+
+    def test_get_offset(self):
+        _KIND = 'KIND'
+        _OFFSET = 10
+        after = self._makeOne(_KIND).offset(_OFFSET)
+        self.assertEqual(after.offset(), _OFFSET)
+
+    def test_group_by_empty(self):
+        _KIND = 'KIND'
+        before = self._makeOne(_KIND)
+        after = before.group_by([])
+        self.assertFalse(after is before)
+        self.assertTrue(isinstance(after, self._getTargetClass()))
+        self.assertEqual(before.to_protobuf(), after.to_protobuf())
+
+    def test_group_by_non_empty(self):
+        _KIND = 'KIND'
+        before = self._makeOne(_KIND)
+        after = before.group_by(['field1', 'field2'])
+        group_by_pb = list(after.to_protobuf().group_by)
+        self.assertEqual(len(group_by_pb), 2)
+        prop_pb1 = group_by_pb[0]
+        self.assertEqual(prop_pb1.name, 'field1')
+        prop_pb2 = group_by_pb[1]
+        self.assertEqual(prop_pb2.name, 'field2')
+
+    def test_get_group_by_non_empty(self):
+        _KIND = 'KIND'
+        _GROUP_BY = ['field1', 'field2']
+        after = self._makeOne(_KIND).group_by(_GROUP_BY)
+        self.assertEqual(after.group_by(), _GROUP_BY)
+
+    def test_group_by_multiple_calls(self):
+        _KIND = 'KIND'
+        _GROUP_BY1 = ['field1', 'field2']
+        _GROUP_BY2 = ['field3']
+        before = self._makeOne(_KIND).group_by(_GROUP_BY1)
+        self.assertEqual(before.group_by(), _GROUP_BY1)
+        after = before.group_by(_GROUP_BY2)
+        self.assertEqual(after.group_by(), _GROUP_BY2)
 
 
 class _Dataset(object):
