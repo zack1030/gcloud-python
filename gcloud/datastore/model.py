@@ -53,11 +53,19 @@ class Property(object):
         self._validator = validator
 
     def __get__(self, instance, owner):
+        if self._repeated:
+            return [self.from_base_type(k) for k in instance.get(self._name, [])]
+
         return self.from_base_type(instance.get(self._name))
 
     def __set__(self, instance, value):
-        value = self.validate(value)
-        instance[self._name] = self.to_base_type(value)
+        if self._repeated:
+            assert isinstance(value, (tuple, list)), "Repeated property only accept list or tuple"
+            value = [self.validate(k) for k in value]
+            instance[self._name] = [self.to_base_type(k) for k in value]
+        else:
+            value = self.validate(value)
+            instance[self._name] = self.to_base_type(value)
 
     def __del__(self, instance):
         instance.pop(self._name, None)
