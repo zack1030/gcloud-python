@@ -7,7 +7,7 @@ from gcloud.storage.acl import BucketACL
 from gcloud.storage.acl import DefaultObjectACL
 from gcloud.storage.iterator import Iterator
 from gcloud.storage.key import Key
-from gcloud.storage.key import KeyIterator
+from gcloud.storage.key import _KeyIterator
 
 
 class Bucket(object):
@@ -19,15 +19,27 @@ class Bucket(object):
     :type name: string
     :param name: The name of the bucket.
     """
+    # ACL rules are lazily retrieved.
+    _acl = _default_object_acl = None
 
     def __init__(self, connection=None, name=None, metadata=None):
         self.connection = connection
         self.name = name
         self.metadata = metadata
 
-        # ACL rules are lazily retrieved.
-        self.acl = None
-        self.default_object_acl = None
+    @property
+    def acl(self):
+        """Create our ACL on demand."""
+        if self._acl is None:
+            self._acl = BucketACL(self)
+        return self._acl
+
+    @property
+    def default_object_acl(self):
+        """Create our defaultObjectACL on demand."""
+        if self._default_object_acl is None:
+            self._default_object_acl = DefaultObjectACL(self)
+        return self._default_object_acl
 
     @classmethod
     def from_dict(cls, bucket_dict, connection=None):
@@ -39,7 +51,6 @@ class Bucket(object):
         :rtype: :class:`Bucket`
         :returns: A bucket constructed from the data provided.
         """
-
         return cls(connection=connection, name=bucket_dict['name'],
                    metadata=bucket_dict)
 
@@ -47,7 +58,7 @@ class Bucket(object):
         return '<Bucket: %s>' % self.name
 
     def __iter__(self):
-        return iter(KeyIterator(bucket=self))
+        return iter(_KeyIterator(bucket=self))
 
     def __contains__(self, key):
         return self.get_key(key) is not None
@@ -55,7 +66,6 @@ class Bucket(object):
     @property
     def path(self):
         """The URL path to this bucket."""
-
         if not self.name:
             raise ValueError('Cannot determine path without bucket name.')
 
@@ -80,7 +90,6 @@ class Bucket(object):
         :rtype: :class:`gcloud.storage.key.Key` or None
         :returns: The key object if it exists, otherwise None.
         """
-
         # Coerce this to a key object (either from a Key or a string).
         key = self.new_key(key)
 
@@ -93,8 +102,8 @@ class Bucket(object):
     def get_all_keys(self):
         """List all the keys in this bucket.
 
-        This will **not** retrieve all the data for all the keys,
-        it will only retrieve metadata about the keys.
+        This will **not** retrieve all the data for all the keys, it
+        will only retrieve metadata about the keys.
 
         This is equivalent to::
 
@@ -103,16 +112,14 @@ class Bucket(object):
         :rtype: list of :class:`gcloud.storage.key.Key`
         :returns: A list of all the Key objects in this bucket.
         """
-
         return list(self)
 
     def new_key(self, key):
         """Given path name (or Key), return a :class:`.storage.key.Key` object.
 
-        This is really useful when you're not sure
-        if you have a Key object or a string path name.
-        Given either of those types,
-        this returns the corresponding Key object.
+        This is really useful when you're not sure if you have a Key
+        object or a string path name.  Given either of those types, this
+        returns the corresponding Key object.
 
         :type key: string or :class:`gcloud.storage.key.Key`
         :param key: A path name or actual key object.
@@ -120,7 +127,6 @@ class Bucket(object):
         :rtype: :class:`gcloud.storage.key.Key`
         :returns: A Key object with the path provided.
         """
-
         if isinstance(key, Key):
             return key
 
@@ -138,21 +144,22 @@ class Bucket(object):
     def delete(self, force=False):
         """Delete this bucket.
 
-        The bucket **must** be empty in order to delete it.
-        If the bucket doesn't exist,
-        this will raise a :class:`gcloud.storage.exceptions.NotFoundError`.
-        If the bucket is not empty,
-        this will raise an Exception.
+        The bucket **must** be empty in order to delete it.  If the
+        bucket doesn't exist, this will raise a
+        :class:`gcloud.storage.exceptions.NotFoundError`.  If the bucket
+        is not empty, this will raise an Exception.
 
-        If you want to delete a non-empty bucket you can pass
-        in a force parameter set to true.
-        This will iterate through the bucket's keys and delete the
-        related objects, before deleting the bucket.
+        If you want to delete a non-empty bucket you can pass in a force
+        parameter set to true.  This will iterate through the bucket's
+        keys and delete the related objects, before deleting the bucket.
 
         :type force: bool
         :param full: If True, empties the bucket's objects then deletes it.
 
-        :raises: :class:`gcloud.storage.exceptions.NotFoundError`
+        :raises: :class:`gcloud.storage.exceptions.NotFoundError` if the
+                 bucket does not exist, or
+                 :class:`gcloud.storage.exceptions.ConnectionError` if the
+                 bucket has keys and `force` is not passed.
         """
         return self.connection.delete_bucket(self.name, force=force)
 
@@ -184,22 +191,30 @@ class Bucket(object):
         :returns: The key that was just deleted.
         :raises: :class:`gcloud.storage.exceptions.NotFoundError`
         """
-
         key = self.new_key(key)
         self.connection.api_request(method='DELETE', path=key.path)
         return key
 
-    def delete_keys(self, keys):
+    def delete_keys(self, keys, on_error=None):
         """Deletes a list of keys from the current bucket.
 
         Uses :func:`Bucket.delete_key` to delete each individual key.
 
         :type keys: list of string or :class:`gcloud.storage.key.Key`
-        :param key: A list of key names or Key objects to delete.
+        :param keys: A list of key names or Key objects to delete.
+
+        :type on_error: a callable taking (key)
+        :param on_error: If not ``None``, called once for each key which
+                         raises a ``NotFoundError``.
         """
-        # NOTE: boto returns a MultiDeleteResult instance.
         for key in keys:
-            self.delete_key(key)
+            try:
+                self.delete_key(key)
+            except exceptions.NotFoundError:
+                if on_error is not None:
+                    on_error(key)
+                else:
+                    raise
 
     def copy_key(self, key, destination_bucket, new_name=None):
         """Copy the given key to the given bucket, optionally with a new name.
@@ -238,10 +253,9 @@ class Bucket(object):
           >>> print bucket.get_all_keys()
           [<Key: my-bucket, remote-text-file.txt>]
 
-        If you don't provide a key value,
-        we will try to upload the file using the local filename
-        as the key
-        (**not** the complete path)::
+        If you don't provide a key value, we will try to upload the file
+        using the local filename as the key (**not** the complete
+        path)::
 
           >>> from gcloud import storage
           >>> connection = storage.get_connection(project, email, key_path)
@@ -254,13 +268,10 @@ class Bucket(object):
         :param filename: Local path to the file you want to upload.
 
         :type key: string or :class:`gcloud.storage.key.Key`
-        :param key: The key (either an object or a remote path)
-                    of where to put the file.
-
-                    If this is blank,
-                    we will try to upload the file
-                    to the root of the bucket
-                    with the same name as on your local file system.
+        :param key: The key (either an object or a remote path) of where
+                    to put the file.  If this is blank, we will try to
+                    upload the file to the root of the bucket with the
+                    same name as on your local file system.
         """
         if key is None:
             key = os.path.basename(filename)
@@ -281,10 +292,9 @@ class Bucket(object):
           >>> print bucket.get_all_keys()
           [<Key: my-bucket, remote-text-file.txt>]
 
-        If you don't provide a key value,
-        we will try to upload the file using the local filename
-        as the key
-        (**not** the complete path)::
+        If you don't provide a key value, we will try to upload the file
+        using the local filename as the key (**not** the complete
+        path)::
 
           >>> from gcloud import storage
           >>> connection = storage.get_connection(project, email, key_path)
@@ -297,13 +307,10 @@ class Bucket(object):
         :param file_obj: A file handle open for reading.
 
         :type key: string or :class:`gcloud.storage.key.Key`
-        :param key: The key (either an object or a remote path)
-                    of where to put the file.
-
-                    If this is blank,
-                    we will try to upload the file
-                    to the root of the bucket
-                    with the same name as on your local file system.
+        :param key: The key (either an object or a remote path) of where
+                    to put the file.  If this is blank, we will try to
+                    upload the file to the root of the bucket with the
+                    same name as on your local file system.
         """
         if key:
             key = self.new_key(key)
@@ -320,7 +327,6 @@ class Bucket(object):
         :rtype: bool
         :returns: Whether metadata is available locally.
         """
-
         if not self.metadata:
             return False
         elif field and field not in self.metadata:
@@ -328,18 +334,15 @@ class Bucket(object):
         else:
             return True
 
-    def reload_metadata(self, full=False):
+    def reload_metadata(self):
         """Reload metadata from Cloud Storage.
-
-        :type full: bool
-        :param full: If True, loads all data (include ACL data).
 
         :rtype: :class:`Bucket`
         :returns: The bucket you just reloaded data for.
         """
-
-        projection = 'full' if full else 'noAcl'
-        query_params = {'projection': projection}
+        # Pass only '?projection=noAcl' here because 'acl'/'defaultObjectAcl'
+        # are handled via 'get_acl()'/'get_default_object_acl()'
+        query_params = {'projection': 'noAcl'}
         self.metadata = self.connection.api_request(
             method='GET', path=self.path, query_params=query_params)
         return self
@@ -347,11 +350,9 @@ class Bucket(object):
     def get_metadata(self, field=None, default=None):
         """Get all metadata or a specific field.
 
-        If you request a field that isn't available,
-        and that field can be retrieved by refreshing data
-        from Cloud Storage,
-        this method will reload the data using
-        :func:`Bucket.reload_metadata`.
+        If you request a field that isn't available, and that field can
+        be retrieved by refreshing data from Cloud Storage, this method
+        will reload the data using :func:`Bucket.reload_metadata`.
 
         :type field: string
         :param field: (optional) A particular field to retrieve from metadata.
@@ -362,10 +363,14 @@ class Bucket(object):
         :rtype: dict or anything
         :returns: All metadata or the value of the specific field.
         """
+        if field == 'acl':
+            raise KeyError("Use 'get_acl()'")
+
+        if field == 'defaultObjectAcl':
+            raise KeyError("Use 'get_default_object_acl()'")
 
         if not self.has_metadata(field=field):
-            full = (field and field in ('acl', 'defaultObjectAcl'))
-            self.reload_metadata(full=full)
+            self.reload_metadata()
 
         if field:
             return self.metadata.get(field, default)
@@ -375,11 +380,11 @@ class Bucket(object):
     def patch_metadata(self, metadata):
         """Update particular fields of this bucket's metadata.
 
-        This method will only update the fields provided
-        and will not touch the other fields.
+        This method will only update the fields provided and will not
+        touch the other fields.
 
-        It will also reload the metadata locally
-        based on the servers response.
+        It will also reload the metadata locally based on the servers
+        response.
 
         :type metadata: dict
         :param metadata: The dictionary of values to update.
@@ -387,7 +392,6 @@ class Bucket(object):
         :rtype: :class:`Bucket`
         :returns: The current bucket.
         """
-
         self.metadata = self.connection.api_request(
             method='PATCH', path=self.path, data=metadata,
             query_params={'projection': 'full'})
@@ -404,9 +408,8 @@ class Bucket(object):
           Check out the official documentation here:
           https://developers.google.com/storage/docs/website-configuration
 
-        If you want this bucket to host a website,
-        just provide the name of an index page
-        and a page to use when a key isn't found::
+        If you want this bucket to host a website, just provide the name
+        of an index page and a page to use when a key isn't found::
 
           >>> from gcloud import storage
           >>> connection = storage.get_connection(project, email,
@@ -418,11 +421,9 @@ class Bucket(object):
 
           >>> bucket.make_public(recursive=True, future=True)
 
-        This says:
-        "Make the bucket public,
-        and all the stuff already in the bucket,
-        and anything else I add to the bucket.
-        Just make it all public."
+        This says: "Make the bucket public, and all the stuff already in
+        the bucket, and anything else I add to the bucket.  Just make it
+        all public."
 
         :type main_page_suffix: string
         :param main_page_suffix: The page to use as the main page
@@ -432,7 +433,6 @@ class Bucket(object):
         :type not_found_page: string
         :param not_found_page: The file to use when a page isn't found.
         """
-
         data = {
             'website': {
                 'mainPageSuffix': main_page_suffix,
@@ -444,10 +444,9 @@ class Bucket(object):
     def disable_website(self):
         """Disable the website configuration for this bucket.
 
-        This is really just a shortcut for
-        setting the website-related attributes to ``None``.
+        This is really just a shortcut for setting the website-related
+        attributes to ``None``.
         """
-
         return self.configure_website(None, None)
 
     def reload_acl(self):
@@ -456,12 +455,15 @@ class Bucket(object):
         :rtype: :class:`Bucket`
         :returns: The current bucket.
         """
+        self.acl.clear()
 
-        self.acl = BucketACL(bucket=self)
+        url_path = '%s/acl' % self.path
+        found = self.connection.api_request(method='GET', path=url_path)
+        for entry in found['items']:
+            self.acl.add_entity(self.acl.entity_from_dict(entry))
 
-        for entry in self.get_metadata('acl', []):
-            entity = self.acl.entity_from_dict(entry)
-            self.acl.add_entity(entity)
+        # Even if we fetch no entries, the ACL is still loaded.
+        self.acl.loaded = True
 
         return self
 
@@ -471,40 +473,35 @@ class Bucket(object):
         :rtype: :class:`gcloud.storage.acl.BucketACL`
         :returns: An ACL object for the current bucket.
         """
-
-        if not self.acl:
+        if not self.acl.loaded:
             self.reload_acl()
         return self.acl
 
     def save_acl(self, acl=None):
         """Save the ACL data for this bucket.
 
-        If called without arguments,
-        this will save the ACL currently stored on the Bucket object.
-        For example,
-        this will save
-        the ACL stored in ``some_other_acl``::
+        If called without arguments, this will save the ACL currently
+        stored on the Bucket object.  For example, this will save the
+        ACL stored in ``some_other_acl``::
 
            >>> bucket.acl = some_other_acl
            >>> bucket.save_acl()
 
-        You can also provide a specific ACL to save
-        instead of the one currently set
-        on the Bucket object::
+        You can also provide a specific ACL to save instead of the one
+        currently set on the Bucket object::
 
            >>> bucket.save_acl(acl=my_other_acl)
 
-        You can use this to set access controls
-        to be consistent from one bucket to another::
+        You can use this to set access controls to be consistent from
+        one bucket to another::
 
           >>> bucket1 = connection.get_bucket(bucket1_name)
           >>> bucket2 = connection.get_bucket(bucket2_name)
           >>> bucket2.save_acl(bucket1.get_acl())
 
-        If you want to **clear** the ACL for the bucket,
-        you must save an empty list (``[]``)
-        rather than using ``None``
-        (which is interpreted as wanting to save the current ACL)::
+        If you want to **clear** the ACL for the bucket, you must save
+        an empty list (``[]``) rather than using ``None`` (which is
+        interpreted as wanting to save the current ACL)::
 
           >>> bucket.save_acl(None)  # Saves the current ACL (self.acl).
           >>> bucket.save_acl([])  # Clears the current ACL.
@@ -514,33 +511,35 @@ class Bucket(object):
                     If left blank, this will save the ACL
                     set locally on the bucket.
         """
-
         # We do things in this weird way because [] and None
         # both evaluate to False, but mean very different things.
         if acl is None:
             acl = self.acl
+            dirty = acl.loaded
+        else:
+            dirty = True
 
-        if acl is None:
-            return self
+        if dirty:
+            result = self.connection.api_request(
+                method='PATCH', path=self.path, data={'acl': list(acl)},
+                query_params={'projection': 'full'})
+            self.acl.clear()
+            for entry in result['acl']:
+                self.acl.entity(self.acl.entity_from_dict(entry))
+            self.acl.loaded = True
 
-        self.patch_metadata({'acl': list(acl)})
-        self.reload_acl()
         return self
 
     def clear_acl(self):
         """Remove all ACL rules from the bucket.
 
-        Note that this won't actually remove *ALL* the rules,
-        but it will remove all the non-default rules.
-        In short,
-        you'll still have access
-        to a bucket that you created
-        even after you clear ACL rules
-        with this method.
+        Note that this won't actually remove *ALL* the rules, but it
+        will remove all the non-default rules.  In short, you'll still
+        have access to a bucket that you created even after you clear
+        ACL rules with this method.
 
-        For example,
-        imagine that you granted access to this bucket
-        to a bunch of coworkers::
+        For example, imagine that you granted access to this bucket to a
+        bunch of coworkers::
 
           >>> from gcloud import storage
           >>> connection = storage.get_connection(project, email,
@@ -558,8 +557,9 @@ class Bucket(object):
 
         At this point all the custom rules you created have been removed.
         """
-
-        return self.save_acl(acl=[])
+        # NOTE:  back-end makes some ACL entries sticky (they remain even
+        #        after the PATCH succeeds.
+        return self.save_acl([])
 
     def reload_default_object_acl(self):
         """Reload the Default Object ACL rules for this bucket.
@@ -567,26 +567,29 @@ class Bucket(object):
         :rtype: :class:`Bucket`
         :returns: The current bucket.
         """
+        doa = self.default_object_acl
+        doa.clear()
 
-        self.default_object_acl = DefaultObjectACL(bucket=self)
+        url_path = '%s/defaultObjectAcl' % self.path
+        found = self.connection.api_request(method='GET', path=url_path)
+        for entry in found['items']:
+            doa.add_entity(doa.entity_from_dict(entry))
 
-        for entry in self.get_metadata('defaultObjectAcl', []):
-            entity = self.default_object_acl.entity_from_dict(entry)
-            self.default_object_acl.add_entity(entity)
+        # Even if we fetch no entries, the ACL is still loaded.
+        doa.loaded = True
 
         return self
 
     def get_default_object_acl(self):
         """Get the current Default Object ACL rules.
 
-        If the appropriate metadata isn't available locally,
-        this method will reload it from Cloud Storage.
+        If the appropriate metadata isn't available locally, this method
+        will reload it from Cloud Storage.
 
         :rtype: :class:`gcloud.storage.acl.DefaultObjectACL`
         :returns: A DefaultObjectACL object for this bucket.
         """
-
-        if not self.default_object_acl:
+        if not self.default_object_acl.loaded:
             self.reload_default_object_acl()
         return self.default_object_acl
 
@@ -599,21 +602,28 @@ class Bucket(object):
                     the ``default_object_acl`` property
                     and save that.
         """
-
         if acl is None:
             acl = self.default_object_acl
+            dirty = acl.loaded
+        else:
+            dirty = True
 
-        if acl is None:
-            return self
+        if dirty:
+            result = self.connection.api_request(
+                method='PATCH', path=self.path,
+                data={'defaultObjectAcl': list(acl)},
+                query_params={'projection': 'full'})
+            doa = self.default_object_acl
+            doa.clear()
+            for entry in result['defaultObjectAcl']:
+                doa.entity(doa.entity_from_dict(entry))
+            doa.loaded = True
 
-        self.patch_metadata({'defaultObjectAcl': list(acl)})
-        self.reload_default_object_acl()
         return self
 
     def clear_default_object_acl(self):
         """Remove the Default Object ACL from this bucket."""
-
-        return self.save_default_object_acl(acl=[])
+        return self.save_default_object_acl([])
 
     def make_public(self, recursive=False, future=False):
         """Make a bucket public.
@@ -626,7 +636,6 @@ class Bucket(object):
         :param future: If True, this will make all objects created in the
                        future public as well.
         """
-
         self.get_acl().all().grant_read()
         self.save_acl()
 
@@ -643,9 +652,8 @@ class Bucket(object):
 class BucketIterator(Iterator):
     """An iterator listing all buckets.
 
-    You shouldn't have to use this directly,
-    but instead should use the helper methods
-    on :class:`gcloud.storage.connection.Connection` objects.
+    You shouldn't have to use this directly, but instead should use the helper
+    methods on :class:`gcloud.storage.connection.Connection` objects.
 
     :type connection: :class:`gcloud.storage.connection.Connection`
     :param connection: The connection to use for querying the list of buckets.
